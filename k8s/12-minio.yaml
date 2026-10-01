@@ -24,21 +24,33 @@ spec:
     metadata:
       labels: {app: minio}
     spec:
+      # RustFS runs as a non-root user; make sure it can write to the volume
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chmod 0777 /data"]
+          volumeMounts:
+            - {name: data, mountPath: /data}
       containers:
         - name: minio
-          image: minio/minio:latest
-          args: ["server", "/data", "--console-address", ":9001"]
+          # S3-compatible store. MinIO's official images were removed from Docker Hub (Sept 2026);
+          # RustFS is an API-compatible drop-in on the same port, so the backend is unchanged.
+          image: rustfs/rustfs:latest
+          args: ["/data"]
           env:
-            - name: MINIO_ROOT_USER
+            - name: RUSTFS_ACCESS_KEY
               valueFrom: {secretKeyRef: {name: minio-credentials, key: MINIO_ACCESS_KEY}}
-            - name: MINIO_ROOT_PASSWORD
+            - name: RUSTFS_SECRET_KEY
               valueFrom: {secretKeyRef: {name: minio-credentials, key: MINIO_SECRET_KEY}}
+            - {name: RUSTFS_ADDRESS, value: ":9000"}
+            - {name: RUSTFS_CONSOLE_ADDRESS, value: ":9001"}
+            - {name: RUSTFS_CONSOLE_ENABLE, value: "true"}
           ports:
             - {containerPort: 9000, name: api}
             - {containerPort: 9001, name: console}
           readinessProbe:
-            httpGet: {path: /minio/health/ready, port: 9000}
-            periodSeconds: 10
+            httpGet: {path: /health, port: 9000}
+            periodSeconds: 5
           volumeMounts:
             - {name: data, mountPath: /data}
           resources:

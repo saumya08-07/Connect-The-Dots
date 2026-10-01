@@ -34,9 +34,9 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
 
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
+  minio:                      # RustFS: S3/MinIO-compatible (MinIO images no longer published)
+    image: rustfs/rustfs:latest
+    command: ["/data"]
     env_file: .env
     volumes: [minio_data:/data]
     restart: unless-stopped

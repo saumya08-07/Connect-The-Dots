@@ -20,7 +20,7 @@ The application is five services behind one entry point:
 
 - **Nginx + React (frontend)** — serves the single-page app and acts as a *reverse proxy* (a server that receives every request and forwards it to the right internal service): `/` → static files, `/api/*` → backend, `/storage/*` → MinIO.
 - **Spring Boot backend** — the only service that talks to the data stores.
-- **MongoDB** stores metadata, **Redis** caches the metadata list for 5 minutes, **MinIO** (an S3-compatible object store) stores uploaded files.
+- **MongoDB** stores metadata, **Redis** caches the metadata list for 5 minutes, **an S3-compatible object store** stores uploaded files. This was MinIO; it is now **RustFS** under the same service name `minio` (see Challenges).
 
 **What was changed in the application to support DevOps work, and why:**
 
@@ -179,7 +179,7 @@ bash scripts/generate-traffic.sh http://localhost 300
 3. **Spring Boot's slow start vs. liveness probes.** Spring Boot takes 20–40 s to start. A liveness probe alone would kill the JVM before it finished starting and cause a restart loop, so a `startupProbe` holds off liveness checks for up to 150 s.
 4. **Liveness must not depend on databases.** If Redis goes down and liveness checked Redis, Kubernetes would restart every healthy backend pod for nothing. Liveness/readiness groups check the app itself.
 5. **Hard-coded config and a committed `.env`.** Moved config to environment variables (ConfigMap/Secret, Ansible template with mode 0600).
-6. **Smoke test failed on the first real pipeline run (HTTP 503).** Every pod had rolled out and the frontend responded, but `/api/health` returned 503 because MinIO was still starting. The workflow had only waited for MongoDB and the backend, then checked health once: a race condition. Fix: wait for every deployment's rollout, and retry the health check for up to 2 minutes. Lesson: a pod being *Ready* only means that pod is ready, not that everything it depends on is.
+6. **MinIO disappeared from Docker Hub.** The first post-merge pipeline run deployed everything except storage. The backend answered `/api/health` with 503. A second run, which waited for every service, showed the real cause: the MinIO pod never became ready. Locally, `docker compose` failed with *pull access denied for minio/mc, repository does not exist*. MinIO stopped publishing free images in October 2025 and deleted its Docker Hub repositories in September 2026, so the original project's compose file no longer works for anyone. Fix: replace it with **RustFS**, an Apache-2.0, S3-API-compatible drop-in on the same port. The service keeps the name `minio`, so `nginx.conf`, the backend config and the MinIO Java SDK needed no code changes. The bucket-creation helper (`minio/mc`) was dropped because the backend already creates the bucket on first upload. The smoke test was also hardened: it now waits for every deployment and retries the health check, because a pod being *Ready* doesn't mean its dependencies are. Lessons: pin and mirror third-party images you depend on; an S3-compatible API (rather than a specific vendor) made the swap a configuration change instead of a rewrite.
 7. **GHCR needs lowercase image names** but the owner is `Riya54671`; the pipeline lowercases it.
 8. **Testing deployments without a paid cluster.** Solved with kind inside the CI runner.
 
@@ -194,7 +194,8 @@ bash scripts/generate-traffic.sh http://localhost 300
 
 ## 8. Known limitations / next steps
 
-- MongoDB, Redis and MinIO run as single replicas (fine for a demo, not HA). Production would use StatefulSets or managed services.
+- MongoDB, Redis and the object store run as single replicas (fine for a demo, not HA). Production would use StatefulSets or managed services.
+- `rustfs/rustfs:latest` should be pinned to a specific version (and ideally mirrored to our own registry) once a release is chosen; `latest` can change underneath you, which is exactly how MinIO broke.
 - Secrets in `k8s/01-config.yaml` and `group_vars` are demo values; use Ansible Vault / Sealed Secrets / an external secret manager.
 - The deploy stage targets an ephemeral kind cluster; pointing it at a real cluster means adding a kubeconfig secret and an approval on the `staging` environment.
 - No Alertmanager configured, so alerts are visible in Prometheus but not sent anywhere.
