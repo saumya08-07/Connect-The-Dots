@@ -147,20 +147,29 @@ jobs:
           kubectl -n connect-the-dots set image deployment/backend backend="$BE"
           kubectl -n connect-the-dots set image deployment/frontend frontend="$FE"
           kubectl -n connect-the-dots set env deployment/backend APP_VERSION="${GITHUB_SHA::7}"
-      - name: Wait for rollout
+      - name: Wait for rollout (every service, dependencies first)
         run: |
-          kubectl -n connect-the-dots rollout status deployment/mongodb --timeout=180s
-          kubectl -n connect-the-dots rollout status deployment/backend  --timeout=300s
-          kubectl -n connect-the-dots rollout status deployment/frontend --timeout=120s
+          for d in mongodb redis minio backend frontend; do
+            kubectl -n connect-the-dots rollout status deployment/$d --timeout=300s
+          done
       - name: Smoke test through Nginx
         run: |
-          kubectl -n connect-the-dots port-forward svc/frontend 8080:80 &
+          kubectl -n connect-the-dots port-forward svc/frontend 8080:80 > /dev/null 2>&1 &
           sleep 5
-          curl -fsS http://localhost:8080/            > /dev/null && echo "frontend OK"
-          curl -fsS http://localhost:8080/api/health  && echo
+          curl -fsS http://localhost:8080/ > /dev/null && echo "frontend OK"
+          # A pod being "Ready" doesn't mean everything it depends on is ready yet,
+          # so retry the dependency health check for up to 2 minutes instead of trying once.
+          for i in $(seq 1 24); do
+            code=$(curl -s -o health.json -w '%{http_code}' http://localhost:8080/api/health || echo 000)
+            echo "attempt $i: HTTP $code $(cat health.json 2>/dev/null)"
+            if [ "$code" = "200" ]; then echo "backend + MongoDB + Redis + MinIO OK"; exit 0; fi
+            sleep 5
+          done
+          echo "Health check never returned 200"; exit 1
       - name: Debug info on failure
         if: failure()
         run: |
           kubectl -n connect-the-dots get all
           kubectl -n connect-the-dots describe deployment backend
+          kubectl -n connect-the-dots logs deployment/minio --tail=50 || true
           kubectl -n connect-the-dots logs deployment/backend --tail=100 || true

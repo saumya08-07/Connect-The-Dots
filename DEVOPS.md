@@ -179,8 +179,9 @@ bash scripts/generate-traffic.sh http://localhost 300
 3. **Spring Boot's slow start vs. liveness probes.** Spring Boot takes 20–40 s to start. A liveness probe alone would kill the JVM before it finished starting and cause a restart loop, so a `startupProbe` holds off liveness checks for up to 150 s.
 4. **Liveness must not depend on databases.** If Redis goes down and liveness checked Redis, Kubernetes would restart every healthy backend pod for nothing. Liveness/readiness groups check the app itself.
 5. **Hard-coded config and a committed `.env`.** Moved config to environment variables (ConfigMap/Secret, Ansible template with mode 0600).
-6. **GHCR needs lowercase image names** but the owner is `Riya54671`; the pipeline lowercases it.
-7. **Testing deployments without a paid cluster.** Solved with kind inside the CI runner.
+6. **Smoke test failed on the first real pipeline run (HTTP 503).** Every pod had rolled out and the frontend responded, but `/api/health` returned 503 because MinIO was still starting. The workflow had only waited for MongoDB and the backend, then checked health once: a race condition. Fix: wait for every deployment's rollout, and retry the health check for up to 2 minutes. Lesson: a pod being *Ready* only means that pod is ready, not that everything it depends on is.
+7. **GHCR needs lowercase image names** but the owner is `Riya54671`; the pipeline lowercases it.
+8. **Testing deployments without a paid cluster.** Solved with kind inside the CI runner.
 
 ## 7. Lessons learned
 
