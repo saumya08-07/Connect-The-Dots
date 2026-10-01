@@ -31,7 +31,27 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      # S3-compatible object storage. Service is still called "minio" so nginx.conf and the
+      minio:
+        condition: service_started
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # S3-compatible object storage. Service is still called "minio" so nginx.conf and the
   # backend's MINIO_* settings keep working, but the image is RustFS: MinIO's official
   # images were deleted from Docker Hub (Sept 2026) and gated on Quay.
   minio:
