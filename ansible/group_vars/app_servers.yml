@@ -13,6 +13,7 @@ admin_users:
 
 base_packages:
   - git
+  - acl                     # setfacl: lets Ansible hand temp files to the ctd user
   - curl
   - ca-certificates
   - gnupg
